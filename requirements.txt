@@ -1,0 +1,19 @@
+# Core Streamlit framework
+streamlit>=1.28.0
+
+# HTTP requests and API communication
+requests>=2.31.0
+urllib3>=2.0.0
+
+# Data manipulation and analysis
+pandas>=2.0.0
+
+# Environment variable management
+python-dotenv>=1.0.0
+
+# JSON handling (built-in, but listing for completeness)
+# json - built-in Python module
+
+# Additional utilities
+# os - built-in Python module
+# time - built-in Python module
