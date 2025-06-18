@@ -1,4 +1,4 @@
-# streamlit_app.py - FIXED VERSION
+# streamlit_app.py - FIXED VERSION FOR BACKEND COMPATIBILITY
 import os
 import streamlit as st
 import requests
@@ -62,8 +62,11 @@ def initialize_session_state():
     """Initialize all session state variables"""
     default_states = {
         'upload_result': None,
+        'column_identification_result': None,
         'matching_result': None,
+        'session_id': None,
         'files_uploaded': False,
+        'columns_identified': False,
         'matching_completed': False,
         'backend_status': None
     }
@@ -147,6 +150,7 @@ def make_api_request(endpoint, method="GET", data=None, files=None):
     """Make API request with proper error handling"""
     try:
         url = f"{BACKEND_URL}{endpoint}"
+        print(f"DEBUG: Making {method} request to: {url}")
         
         if method == "GET":
             response = requests.get(url, timeout=REQUEST_TIMEOUT)
@@ -186,13 +190,17 @@ def display_preprocessing_summary(result):
         <div class="metric-card">
             <strong>Original rows:</strong> {info['bank_original_rows']}<br>
             <strong>Processed rows:</strong> {info['bank_processed_rows']}<br>
-            <strong>Rows removed:</strong> {info['bank_original_rows'] - info['bank_processed_rows']}
+            <strong>Rows removed:</strong> {info['bank_original_rows'] - info['bank_processed_rows']}<br>
+            <strong>Sensitive columns detected:</strong> {len(info.get('bank_sensitive_columns', []))}
         </div>
         """, unsafe_allow_html=True)
         
+        if info.get('bank_sensitive_columns'):
+            st.write("**Encrypted columns:**", ", ".join(info['bank_sensitive_columns']))
+        #st.write(result)
         st.write("**Sample Processed Data (first 5 rows):**")
-        if result['bank_statement_processed']:
-            df_display = pd.DataFrame(result['bank_statement_processed']).head()
+        if result['bank_statement_sample']:
+            df_display = pd.DataFrame(result['bank_statement_sample']).head()
             st.dataframe(df_display, use_container_width=True)
         else:
             st.info("No bank statement data after preprocessing.")
@@ -205,25 +213,65 @@ def display_preprocessing_summary(result):
         <div class="metric-card">
             <strong>Original rows:</strong> {info['invoice_original_rows']}<br>
             <strong>Processed rows:</strong> {info['invoice_processed_rows']}<br>
-            <strong>Rows removed:</strong> {info['invoice_original_rows'] - info['invoice_processed_rows']}
+            <strong>Rows removed:</strong> {info['invoice_original_rows'] - info['invoice_processed_rows']}<br>
+            <strong>Sensitive columns detected:</strong> {len(info.get('invoice_sensitive_columns', []))}
         </div>
         """, unsafe_allow_html=True)
         
+        if info.get('invoice_sensitive_columns'):
+            st.write("**Encrypted columns:**", ", ".join(info['invoice_sensitive_columns']))
+        
         st.write("**Sample Processed Data (first 5 rows):**")
-        if result['invoices_processed']:
-            df_display = pd.DataFrame(result['invoices_processed']).head()
+        if result['invoices_sample']:
+            df_display = pd.DataFrame(result['invoices_sample']).head()
             st.dataframe(df_display, use_container_width=True)
         else:
             st.info("No invoice data after preprocessing.")
+
+def display_column_identification(result):
+    """Display column identification results"""
+    st.subheader("🔍 Column Identification Results")
+    
+    col_info = result['column_info']
+    
+    col1_col, col2_col = st.columns(2)
+    
+    with col1_col:
+        st.markdown("#### Bank Statement Key Columns")
+        for col in col_info['bank_key_columns']:
+            st.write(f"• {col}")
+        
+        st.markdown("**Primary Match Field:**")
+        st.write(f"• {col_info['primary_match_fields']['bank']}")
+        
+        st.markdown("**Secondary Match Fields:**")
+        for col in col_info['secondary_match_fields']['bank']:
+            st.write(f"• {col}")
+    
+    with col2_col:
+        st.markdown("#### Invoice Key Columns")
+        for col in col_info['invoice_key_columns']:
+            st.write(f"• {col}")
+        
+        st.markdown("**Primary Match Field:**")
+        st.write(f"• {col_info['primary_match_fields']['invoice']}")
+        
+        st.markdown("**Secondary Match Fields:**")
+        for col in col_info['secondary_match_fields']['invoice']:
+            st.write(f"• {col}")
+    
+    st.markdown("#### Matching Strategy")
+    st.info(col_info['matching_strategy'])
 
 def display_matching_results(result):
     """Display matching results in a structured format"""
     st.subheader("📊 Reconciliation Results")
     
     # Summary metrics
-    total_matches = len(result.get('matches', []))
-    unmatched_bank = len(result.get('unmatched_file_a_entries', []))
-    unmatched_invoices = len(result.get('unmatched_file_b_entries', []))
+    summary = result.get('summary', {})
+    total_matches = summary.get('matched_pairs', 0)
+    unmatched_bank = summary.get('unmatched_bank', 0)
+    unmatched_invoices = summary.get('unmatched_invoices', 0)
     
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -238,13 +286,24 @@ def display_matching_results(result):
     # Display detailed results
     if result.get('matches'):
         with st.expander("✅ Matched Transactions", expanded=True):
-            matched_df = pd.DataFrame(result['matches'])
-            # Flatten nested data for better display
-            matched_df_flat = pd.json_normalize(matched_df['file_a_entry']).add_prefix('Bank_')
-            matched_df_flat = matched_df_flat.join(pd.json_normalize(matched_df['file_b_entry']).add_prefix('Invoice_'))
-            matched_df_flat['Confidence'] = matched_df['confidence_score']
-            matched_df_flat['Match_Reason'] = matched_df['match_reason']
-            st.dataframe(matched_df_flat, use_container_width=True)
+            matched_data = []
+            for match in result['matches']:
+                # Flatten the match data for display
+                row = {}
+                # Add bank data with prefix
+                for key, value in match['file_a_entry'].items():
+                    row[f"Bank_{key}"] = value
+                # Add invoice data with prefix
+                for key, value in match['file_b_entry'].items():
+                    row[f"Invoice_{key}"] = value
+                # Add match metadata
+                row['Confidence_Score'] = match['confidence_score']
+                row['Match_Reason'] = match['match_reason']
+                matched_data.append(row)
+            
+            if matched_data:
+                matched_df = pd.DataFrame(matched_data)
+                st.dataframe(matched_df, use_container_width=True)
     
     if result.get('unmatched_file_a_entries'):
         with st.expander("⚠️ Unmatched Bank Transactions"):
@@ -333,6 +392,7 @@ if st.button("🚀 Upload & Prepare Data", type="primary", disabled=upload_disab
                 if result.get('success'):
                     st.success("✅ Files uploaded and preprocessed successfully!")
                     st.session_state['upload_result'] = result
+                    st.session_state['session_id'] = result['session_id']
                     st.session_state['files_uploaded'] = True
                     display_preprocessing_summary(result)
                 else:
@@ -340,10 +400,38 @@ if st.button("🚀 Upload & Prepare Data", type="primary", disabled=upload_disab
             else:
                 st.error(f"❌ Server error during upload: Status Code {response.status_code if response else 'No response'}")
 
-# Step 2: AI-Powered Matching
-if st.session_state.get('upload_result'):
-    st.header("🤖 Step 2: AI-Powered Matching")
-    st.write("Click below to start the AI reconciliation process using OpenAI.")
+# Step 2: Column Identification
+if st.session_state.get('upload_result') and st.session_state.get('session_id'):
+    st.header("🔍 Step 2: AI Column Identification")
+    st.write("Let AI identify the key columns for transaction matching.")
+    column_disabled = (st.session_state.get('columns_identified', False) or 
+                      not st.session_state.backend_status["connected"])
+    if st.button("🤖 Identify Key Columns", type="secondary", disabled=column_disabled):
+        with st.spinner("AI is analyzing your data to identify key matching columns..."):
+            column_payload = {
+                'session_id': st.session_state['session_id']
+            }
+
+            response, error = make_api_request("/identify_columns", method="POST", data=column_payload)
+            st.write(response,error)
+            if error:
+                st.error(f"❌ Column identification failed: {error}")
+            elif response and response.status_code == 200:
+                result = response.json()
+                if result.get('success'):
+                    st.success("✅ Key columns identified successfully!")
+                    st.session_state['column_identification_result'] = result
+                    st.session_state['columns_identified'] = True
+                    display_column_identification(result)
+                else:
+                    st.error(f"❌ Column identification error: {result.get('error', 'Unknown error')}")
+            else:
+                st.error(f"❌ Server error during column identification: Status Code {response.status_code if response else 'No response'}")
+
+# Step 3: AI-Powered Matching
+if st.session_state.get('column_identification_result') and st.session_state.get('session_id'):
+    st.header("🤖 Step 3: AI-Powered Transaction Matching")
+    st.write("Start the AI reconciliation process using the identified columns.")
 
     matching_disabled = (st.session_state.get('matching_completed', False) or 
                         not st.session_state.backend_status["connected"])
@@ -351,8 +439,7 @@ if st.session_state.get('upload_result'):
     if st.button("🚀 Start AI Matching", type="secondary", disabled=matching_disabled):
         with st.spinner("Performing AI matching... This may take a while for large datasets."):
             matching_payload = {
-                'bank_data': st.session_state['upload_result']['bank_statement_processed'],
-                'invoice_data': st.session_state['upload_result']['invoices_processed']
+                'session_id': st.session_state['session_id']
             }
 
             response, error = make_api_request("/match", method="POST", data=matching_payload)
@@ -373,16 +460,31 @@ if st.session_state.get('upload_result'):
 
 # Download Results
 if st.session_state.get('matching_result'):
-    st.header("📥 Step 3: Download Results")
+    st.header("📥 Step 4: Download Results")
     col1, col2 = st.columns(2)
     
     with col1:
         if st.button("📊 Download Matched Transactions"):
             if st.session_state['matching_result'].get('matches'):
-                matched_df = pd.DataFrame(st.session_state['matching_result']['matches'])
+                # Prepare matched data for download
+                matched_data = []
+                for match in st.session_state['matching_result']['matches']:
+                    row = {}
+                    # Add bank data with prefix
+                    for key, value in match['file_a_entry'].items():
+                        row[f"Bank_{key}"] = value
+                    # Add invoice data with prefix
+                    for key, value in match['file_b_entry'].items():
+                        row[f"Invoice_{key}"] = value
+                    # Add match metadata
+                    row['Confidence_Score'] = match['confidence_score']
+                    row['Match_Reason'] = match['match_reason']
+                    matched_data.append(row)
+                
+                matched_df = pd.DataFrame(matched_data)
                 csv = matched_df.to_csv(index=False)
                 st.download_button(
-                    label="Download CSV",
+                    label="Download Matched Transactions CSV",
                     data=csv,
                     file_name=f"matched_transactions_{int(time.time())}.csv",
                     mime="text/csv"
@@ -394,14 +496,11 @@ if st.session_state.get('matching_result'):
         if st.button("📋 Download Full Report"):
             # Create a comprehensive report
             report_data = {
-                'summary': {
-                    'total_matches': len(st.session_state['matching_result'].get('matches', [])),
-                    'unmatched_bank': len(st.session_state['matching_result'].get('unmatched_file_a_entries', [])),
-                    'unmatched_invoices': len(st.session_state['matching_result'].get('unmatched_file_b_entries', []))
-                },
+                'summary': st.session_state['matching_result'].get('summary', {}),
                 'matches': st.session_state['matching_result'].get('matches', []),
                 'unmatched_bank': st.session_state['matching_result'].get('unmatched_file_a_entries', []),
-                'unmatched_invoices': st.session_state['matching_result'].get('unmatched_file_b_entries', [])
+                'unmatched_invoices': st.session_state['matching_result'].get('unmatched_file_b_entries', []),
+                'column_info': st.session_state['matching_result'].get('column_info', {})
             }
             
             json_report = json.dumps(report_data, indent=2, default=str)
@@ -413,7 +512,9 @@ if st.session_state.get('matching_result'):
             )
 
 # Reset functionality
-if st.session_state.get('files_uploaded') or st.session_state.get('matching_completed'):
+if (st.session_state.get('files_uploaded') or 
+    st.session_state.get('columns_identified') or 
+    st.session_state.get('matching_completed')):
     st.header("🔄 Reset")
     if st.button("🗑️ Clear All Data and Start Over", type="secondary"):
         # Clear all session state
@@ -447,12 +548,19 @@ with st.sidebar:
     st.subheader("📈 Progress")
     progress_items = [
         ("📁 Files Uploaded & Preprocessed", st.session_state.get('files_uploaded', False)),
+        ("🔍 Columns Identified", st.session_state.get('columns_identified', False)),
         ("🤖 AI Matching Completed", st.session_state.get('matching_completed', False))
     ]
     
     for item, status in progress_items:
         status_icon = "✅" if status else "⏳"
         st.write(f"{item}: {status_icon}")
+    
+    # Session info
+    if st.session_state.get('session_id'):
+        st.markdown("---")
+        st.subheader("🗂️ Session Info")
+        st.write(f"**Session ID:** `{st.session_state['session_id'][:20]}...`")
     
     # Configuration info
     st.markdown("---")

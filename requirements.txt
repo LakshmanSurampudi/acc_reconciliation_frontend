@@ -17,3 +17,26 @@ python-dotenv>=1.0.0
 # Additional utilities
 # os - built-in Python module
 # time - built-in Python module
+
+
+# JSON handling (built-in, but listing for completeness)
+# json - built-in Python module
+
+# Time handling (built-in)
+# time - built-in Python module
+
+# Operating system interface (built-in)
+# os - built-in Python module
+
+# Optional: If you need additional data format support
+openpyxl>=3.1.0  # For Excel file handling
+xlrd>=2.0.0      # For older Excel format support
+
+# Optional: For better error handling and logging
+loguru>=0.7.0    # Alternative logging library (optional)
+
+# Optional: For data validation
+pydantic>=2.0.0  # Data validation (optional)
+
+# Optional: For enhanced data processing
+numpy>=1.24.0    # Numerical computing (optional, but recommended with pandas)
