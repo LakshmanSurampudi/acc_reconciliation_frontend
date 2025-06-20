@@ -370,35 +370,39 @@ with col2:
 upload_disabled = st.session_state.get('files_uploaded', False) or not st.session_state.backend_status["connected"]
 
 if st.button("🚀 Upload & Prepare Data", type="primary", disabled=upload_disabled):
-    # Validate files
-    bank_valid, bank_msg = validate_file(bank_file, "Bank statement") if bank_file else (False, "Bank statement file is required")
-    invoice_valid, invoice_msg = validate_file(invoice_file, "Invoice") if invoice_file else (False, "Invoice file is required")
-    
-    if not bank_valid or not invoice_valid:
-        st.error(f"❌ Please fix the following issues:\n- {bank_msg if not bank_valid else ''}\n- {invoice_msg if not invoice_valid else ''}")
+    # Check for duplicate file names
+    if bank_file and invoice_file and bank_file.name == invoice_file.name:
+        st.error("❌ Both files have same name")
     else:
-        with st.spinner("Uploading, parsing, and preprocessing files... This may take a moment."):
-            files = {
-                'bank_statement': (bank_file.name, bank_file.getvalue(), bank_file.type),
-                'invoices': (invoice_file.name, invoice_file.getvalue(), invoice_file.type)
-            }
+        # Validate files
+        bank_valid, bank_msg = validate_file(bank_file, "Bank statement") if bank_file else (False, "Bank statement file is required")
+        invoice_valid, invoice_msg = validate_file(invoice_file, "Invoice") if invoice_file else (False, "Invoice file is required")
+        
+        if not bank_valid or not invoice_valid:
+            st.error(f"❌ Please fix the following issues:\n- {bank_msg if not bank_valid else ''}\n- {invoice_msg if not invoice_valid else ''}")
+        else:
+            with st.spinner("Uploading, parsing, and preprocessing files... This may take a moment."):
+                files = {
+                    'bank_statement': (bank_file.name, bank_file.getvalue(), bank_file.type),
+                    'invoices': (invoice_file.name, invoice_file.getvalue(), invoice_file.type)
+                }
 
-            response, error = make_api_request("/upload", method="POST", files=files)
-            
-            if error:
-                st.error(f"❌ Upload failed: {error}")
-            elif response and response.status_code == 200:
-                result = response.json()
-                if result.get('success'):
-                    st.success("✅ Files uploaded and preprocessed successfully!")
-                    st.session_state['upload_result'] = result
-                    st.session_state['session_id'] = result['session_id']
-                    st.session_state['files_uploaded'] = True
-                    display_preprocessing_summary(result)
+                response, error = make_api_request("/upload", method="POST", files=files)
+                
+                if error:
+                    st.error(f"❌ Upload failed: {error}")
+                elif response and response.status_code == 200:
+                    result = response.json()
+                    if result.get('success'):
+                        st.success("✅ Files uploaded and preprocessed successfully!")
+                        st.session_state['upload_result'] = result
+                        st.session_state['session_id'] = result['session_id']
+                        st.session_state['files_uploaded'] = True
+                        display_preprocessing_summary(result)
+                    else:
+                        st.error(f"❌ Error during file processing: {result.get('error', 'Unknown error')}")
                 else:
-                    st.error(f"❌ Error during file processing: {result.get('error', 'Unknown error')}")
-            else:
-                st.error(f"❌ Server error during upload: Status Code {response.status_code if response else 'No response'}")
+                    st.error(f"❌ Server error during upload: Status Code {response.status_code if response else 'No response'}")
 
 # Step 2: Column Identification
 if st.session_state.get('upload_result') and st.session_state.get('session_id'):
